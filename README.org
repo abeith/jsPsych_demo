@@ -1,7 +1,31 @@
 * Quick Start
+
+** Create server/DB
+   #+begin_src sh
+     git clone https://github.com/abeith/jsPsych_demo.git
+     cd jsPsych_demo
+     docker-compose up -d --build
+   #+end_src
+  
+** Run R scripts
+
+*** Init DB
+    
+    #+begin_src sh
+      Rscript R/init_db.R
+    #+end_src
+
+*** Init table
+
+    #+begin_src sh
+      Rscript R/init_table.R
+    #+end_src
+   
+* Emacs Quick Start
 ** Run this block to create folders
      
       #+begin_src sh :results silent
+        mkdir R
         mkdir -p server/www/private
       #+end_src
 
@@ -69,7 +93,7 @@
 * Init DB
 
   #+NAME: init_db
-  #+begin_src R :results silent
+  #+begin_src R :results silent :tangle R/init_db.R
     con <- DBI::dbConnect(
                   RMariaDB::MariaDB(),
                   host = '127.0.0.1',
@@ -95,7 +119,7 @@
   There are also other ways of storing this data: e.g. Make type, prompt, name, options and required columns. The options column would either have to be a string that's later converted to JSON or a reference for another table that contains the options as nested columns aren't possible.
   
   #+NAME: init_table
-  #+begin_src R :results silent
+  #+begin_src R :results silent :tangle R/init_table.R
    
     con <- DBI::dbConnect(
                   RMariaDB::MariaDB(),
