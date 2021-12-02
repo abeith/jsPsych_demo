@@ -1,0 +1,300 @@
+* Quick Start
+** Run this block to create folders
+     
+      #+begin_src sh :results silent
+        mkdir -p server/www/private
+      #+end_src
+
+** Tangle all the blocks (C-c C-v C-t)
+** Create the server in Docker from the command line (make sure you're in this directory)
+
+   #+begin_src sh :eval never
+     docker-compose up -d --build
+   #+end_src
+  
+** Create the database in R
+
+   You won't need to do this in production as database will already exist
+
+   #+CALL: init_db()
+
+** Create the table in R
+
+   #+CALL: init_table()
+   
+** Check if it works
+
+   Go to localhost:8080 in your browser.
+   
+* Server
+** Dockerfile
+
+   The image didn't have the right packages installed so need to add this
+   
+   #+begin_src text :tangle server.Dockerfile
+     FROM php:7.1-apache
+     RUN docker-php-ext-install mysqli pdo pdo_mysql
+   #+end_src
+  
+** Docker-compose
+
+   Set up server and database with a single configuration
+   
+   #+begin_src yaml :tangle docker-compose.yml
+     version: '3.1'
+     
+     services:
+       php:
+         build:
+           context: .
+           dockerfile: server.Dockerfile
+         container_name: server
+         ports:
+           - 8080:80
+         links:
+           - "db:database"
+         restart: always
+         volumes:
+           - ./server/www:/var/www/html/
+       db:
+         container_name: db
+         image: mariadb
+         ports:
+           - 3306:3306
+         restart: always
+         environment:
+           MYSQL_ROOT_PASSWORD: example
+     #+end_src
+
+* Init DB
+
+  #+NAME: init_db
+  #+begin_src R :results silent
+    con <- DBI::dbConnect(
+                  RMariaDB::MariaDB(),
+                  host = '127.0.0.1',
+                  port = '3306',
+                  user = 'root',
+                  password = 'example'
+                )
+    
+    DBI::dbSendStatement(con, 'CREATE DATABASE jsPsych;')
+    
+    DBI::dbDisconnect(con)    
+  #+end_src
+  
+* Create survey questions
+
+  This is one way to do it but you'll want to figure out what works best for you. The JSON objects that jsPsych uses are saved as strings in the database table. There are different options for sequencing the trials:
+  * R: Make lists of question sequences and filter results by list when pulling them (would require a list column in the table below) 
+  * SQL: Create an SQL query that sorts them and use php to execute that query
+  * PHP: Pull all the questions from the database and write php code to sequence them
+  * JavaScript: Write js code to sequence questions
+  * jsPsych: Use build-in jsPsych functions to sequence (https://www.jspsych.org/7.1/reference/jspsych-randomization/)
+
+  There are also other ways of storing this data: e.g. Make type, prompt, name, options and required columns. The options column would either have to be a string that's later converted to JSON or a reference for another table that contains the options as nested columns aren't possible.
+  
+  #+NAME: init_table
+  #+begin_src R :results silent
+   
+    con <- DBI::dbConnect(
+                  RMariaDB::MariaDB(),
+                  host = '127.0.0.1',
+                  port = '3306',
+                  user = 'root',
+                  password = 'example',
+                  dbname = 'jsPsych'
+                )
+    
+    trial_1 <- list(
+      type = 'html',
+      prompt = 'Please answer the following questions'
+    )
+    
+    trial_2 <- list(
+      type = 'multi-choice',
+      prompt = 'Which of the following do you like the most?',
+      name = 'VegetablesLike',
+      options = c('Tomato', 'Cucumber', 'Eggplant', 'Corn', 'Peas'),
+      required = TRUE
+    )
+    
+    trial_3 <- list(
+      type = 'multi-select',
+      prompt = 'Which of the following do you like?',
+      name = 'FruitLike',
+      options = c('Apple', 'Banana', 'Orange', 'Grape', 'Strawberry'),
+      required = TRUE
+    )
+    
+    json_list <- purrr::map(list(trial_1, trial_2, trial_3), jsonlite::toJSON, auto_unbox = TRUE)
+    
+    item_strings <- tibble::tibble(
+                              item = 1:3,
+                              json = purrr::map_chr(json_list, as.character)
+                            )
+    
+    DBI::dbWriteTable(con, name = 'item_strings', item_strings)
+    
+    DBI::dbDisconnect(con)
+  #+end_src
+  
+* Create connection class
+** Save config
+
+   #+begin_src text :tangle server/www/private/conf.ini
+     [database]
+     driver = mysql
+     host = db
+     port = 3306          
+     dbname = jsPsych
+     username = root
+     password = example
+   #+end_src
+
+** PHP connection class
+
+   #+begin_src php :tangle server/www/private/dbConnect.php
+     <?php
+     class dbConnect {
+         private $pdo = null;
+     
+         public function getPDO(){
+             return $this->pdo;
+         }
+     
+         public function __construct(){
+             try {
+                 $conf = parse_ini_file(__DIR__ . '/conf.ini', true);
+                 $dsn = sprintf('mysql:host=%s;port=%s;dbname=%s', $conf['database']['host'], $conf['database']['port'], $conf['database']['dbname']);
+                 $username = $conf['database']['username'];
+                 $password = $conf['database']['password'];
+     
+                 $this->pdo = new PDO($dsn, $username, $password);
+                 // set the PDO error mode to exception
+                 $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+             } catch(PDOException $e) {
+                 echo "<script>console.log('Connection failed: " . $e->getMessage() . "')</script>";
+             }
+         }
+     }
+   #+end_src
+
+#+begin_src php
+$con = new PDO('mysql:host=db;port=3306;dbname=jsPsych', 'root', 'example')  
+#+end_src
+   
+** htaccess
+
+   This prevents anyone looking at this folder
+   
+   #+begin_src .htaccess :tangle server/www/private/.htaccess
+    <Location />
+    Order deny, allow
+    </Location>
+   #+end_src
+  
+* Web
+** php
+
+   Fetch trials from database using php
+   
+    #+begin_src php :tangle server/www/fetchTrials.php
+      <?php
+     
+      require_once(__DIR__ . '/private/dbConnect.php');
+      $dbCon = new dbConnect();
+      $pdo = $dbCon->getPDO();
+     
+      $query = "SELECT * FROM item_strings";
+     
+      $sth = $pdo->query($query);
+     
+      $result = $sth->fetchAll(PDO::FETCH_ASSOC);
+     
+      echo json_encode($result);
+     
+      ?> 
+    #+end_src
+
+** html
+
+   Basic web page. Using a remote version of jsPsych for ease but this shouldn't be done in production. Saved this as php because that's the default index for the server.
+   
+    #+begin_src html :tangle server/www/index.php
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <script src="https://unpkg.com/jspsych@7.1.0"></script>
+          <link href="https://unpkg.com/jspsych@7.1.0/css/jspsych.css" rel="stylesheet" type="text/css" />
+          <script src="https://unpkg.com/@jspsych/plugin-survey"></script>
+        </head>
+        <body>
+          <script src="experiment.js"></script>
+        </body>
+      </html>
+    #+end_src
+
+** javaScript
+
+   Read trials from database and run jsPsych experiment.
+   
+    #+begin_src js :tangle server/www/experiment.js
+      var jsPsych = initJsPsych({
+          on_finish: function(){
+              jsPsych.data.displayData();
+          }
+      });
+     
+      function postData(data, uri) {
+     
+          let result = new Promise(function (resolve, reject) {
+              let xhr = new XMLHttpRequest();
+              xhr.open('POST', uri);
+              xhr.setRequestHeader('Content-Type', 'application/json');
+              xhr.onload = function () {
+                  if (this.status >= 200 && this.status < 300) {
+                      resolve(JSON.parse(xhr.response));
+                  } else {
+                      logMessage(`Error in postData (onload: ${uri}): ${xhr.statusText}`);
+                      reject({
+                          status: this.status,
+                          statusText: xhr.statusText
+                      });
+                  }
+              };
+              xhr.onerror = function () {
+                  logMessage(`Error in postData (onerror: ${uri}): ${xhr.statusText}`);
+                  reject({
+                      status: this.status,
+                      statusText: xhr.statusText
+                  });
+              };
+              xhr.send(JSON.stringify(data));
+          });
+     
+          return result;
+      };
+     
+      async function run_experiment(){
+          let data = await postData({session_id: '1'}, 'fetchTrials.php');
+          console.log(data);
+     
+          let pages = data.map(x => JSON.parse(x.json));
+     
+          let trial = {
+              type: jsPsychSurvey,
+              pages: [pages]
+          };
+     
+          console.log(trial);
+     
+          let timeline = [trial];
+     
+          jsPsych.run(timeline);
+     
+      }
+     
+      run_experiment();
+    #+end_src
+
