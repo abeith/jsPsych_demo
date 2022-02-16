@@ -19,10 +19,8 @@ const postData = async(data, uri) => {
     }
 };
 
-
 var jsPsych = initJsPsych({
     on_finish: function(){
-        // jsPsych.data.displayData();
         let responses = jsPsych.data.get().trials[0].response;
         let questions = Object.keys(responses);
         questions.map(x => responses[x] = JSON.stringify(responses[x]))
@@ -30,8 +28,6 @@ var jsPsych = initJsPsych({
         postData(responses, 'saveResponses.php')
     }
 });
-
-
 
 async function run_experiment(){
     let data = await postData({session_id: '1'}, 'fetchTrials.php');

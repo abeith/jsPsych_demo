@@ -87,14 +87,17 @@
            - ./server/www:/var/www/html/
        db:
          container_name: db
-         image: mariadb
+         image: mariadb:10.4
+         environment:
+           MYSQL_USER: root
+           MYSQL_PASSWORD: example
+           MYSQL_ROOT_PASSWORD: example
          ports:
            - 3306:3306
          restart: always
          volumes:
            - ./server/db:/var/lib/mysql
-         environment:
-           MYSQL_ROOT_PASSWORD: example
+     
      #+end_src
 
 * Database setup
@@ -109,9 +112,9 @@
                    user = 'root',
                    password = 'example'
                  )
-    
+     
      DBI::dbSendStatement(con, 'CREATE DATABASE jsPsych;')
-    
+     
      DBI::dbDisconnect(con)    
    #+end_src
   
@@ -191,13 +194,13 @@
                    password = 'example',
                    dbname = 'jsPsych'
                  )
-    
+       
      query <- 
        <<quote-blks("respTable")>>
      DBI::dbSendQuery(con, query)
      DBI::dbDisconnect(con)
    #+end_src
-
+   
 * Web
 ** Backend
 *** MariaDB config
@@ -320,7 +323,8 @@
            echo $e->getMessage();
        };
      #+end_src
-    
+
+     
 ** Frontend
 *** index.php
 
@@ -465,4 +469,3 @@
      tail(df)
     
    #+end_src
-  

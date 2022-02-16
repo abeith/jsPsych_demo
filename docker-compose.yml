@@ -15,11 +15,13 @@ services:
       - ./server/www:/var/www/html/
   db:
     container_name: db
-    image: mariadb
+    image: mariadb:10.4
+    environment:
+      MYSQL_USER: root
+      MYSQL_PASSWORD: example
+      MYSQL_ROOT_PASSWORD: example
     ports:
       - 3306:3306
     restart: always
     volumes:
       - ./server/db:/var/lib/mysql
-    environment:
-      MYSQL_ROOT_PASSWORD: example
