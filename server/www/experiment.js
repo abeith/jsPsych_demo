@@ -1,38 +1,37 @@
+const postData = async(data, uri) => {
+    const settings = {
+        method: 'POST',
+        headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+    };
+
+    try{
+        const fetchResponse = await fetch(uri, settings);
+        const data = await fetchResponse.json();
+        console.log(data);
+        return data;
+    } catch(e){
+        console.log(e);
+        return false;
+    }
+};
+
+
 var jsPsych = initJsPsych({
     on_finish: function(){
-        jsPsych.data.displayData();
+        // jsPsych.data.displayData();
+        let responses = jsPsych.data.get().trials[0].response;
+        let questions = Object.keys(responses);
+        questions.map(x => responses[x] = JSON.stringify(responses[x]))
+
+        postData(responses, 'saveResponses.php')
     }
 });
 
-function postData(data, uri) {
 
-    let result = new Promise(function (resolve, reject) {
-        let xhr = new XMLHttpRequest();
-        xhr.open('POST', uri);
-        xhr.setRequestHeader('Content-Type', 'application/json');
-        xhr.onload = function () {
-            if (this.status >= 200 && this.status < 300) {
-                resolve(JSON.parse(xhr.response));
-            } else {
-                logMessage(`Error in postData (onload: ${uri}): ${xhr.statusText}`);
-                reject({
-                    status: this.status,
-                    statusText: xhr.statusText
-                });
-            }
-        };
-        xhr.onerror = function () {
-            logMessage(`Error in postData (onerror: ${uri}): ${xhr.statusText}`);
-            reject({
-                status: this.status,
-                statusText: xhr.statusText
-            });
-        };
-        xhr.send(JSON.stringify(data));
-    });
-
-    return result;
-};
 
 async function run_experiment(){
     let data = await postData({session_id: '1'}, 'fetchTrials.php');
