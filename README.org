@@ -201,6 +201,39 @@
      DBI::dbDisconnect(con)
    #+end_src
    
+** Create likert response table
+
+   #+NAME: likertTable
+   #+begin_src sql
+     CREATE OR REPLACE TABLE likertResp (
+       rt INT(5),
+       question VARCHAR(50),
+       response VARCHAR(50),
+       trial_type VARCHAR(50),
+       trial_index INT(3),
+       time_elapsed INT(5),
+       internal_node_id VARCHAR(50)
+       )
+   #+end_src
+
+   #+NAME: likert_table
+   #+begin_src R :colnames yes :noweb yes :results silent
+     con <- DBI::dbConnect(
+                   RMariaDB::MariaDB(),
+                   host = '127.0.0.1',
+                   port = '3306',
+                   user = 'root',
+                   password = 'example',
+                   dbname = 'jsPsych'
+                 )
+       
+     query <- 
+       <<quote-blks("likertTable")>>
+     DBI::dbSendQuery(con, query)
+     DBI::dbDisconnect(con)
+   #+end_src
+   
+   
 * Web
 ** Backend
 *** MariaDB config
@@ -323,7 +356,6 @@
            echo $e->getMessage();
        };
      #+end_src
-
      
 ** Frontend
 *** index.php
@@ -469,3 +501,142 @@
      tail(df)
     
    #+end_src
+   
+* Alternative insert method
+
+  Write an SQL procedure to insert data. We then need to provide a JSON object as a string with all of these parameters
+  
+  #+name: insertProc
+  #+begin_src sql
+    CREATE OR REPLACE PROCEDURE insertLikertResp(IN json VARCHAR(9999))
+      INSERT INTO likertResp (rt, question, response, trial_type, trial_index, time_elapsed, internal_node_id)
+      VALUES(
+        JSON_EXTRACT(json, '$.rt'),
+        JSON_EXTRACT(json, '$.question'),
+        JSON_EXTRACT(json, '$.response'),
+        JSON_EXTRACT(json, '$.trial_type'),
+        JSON_EXTRACT(json, '$.trial_index'),
+        JSON_EXTRACT(json, '$.time_elapsed'),
+        JSON_EXTRACT(json, '$.internal_node_id')
+      )
+  #+end_src
+
+  Execute this code in R (orgmode only)
+  
+   #+begin_src R :colnames yes :noweb yes :results silent
+     con <- DBI::dbConnect(
+                   RMariaDB::MariaDB(),
+                   host = '127.0.0.1',
+                   port = '3306',
+                   user = 'root',
+                   password = 'example',
+                   dbname = 'jsPsych'
+                 )
+       
+     query <- 
+       <<quote-blks("insertProc")>>
+     DBI::dbSendStatement(con, query)
+     DBI::dbDisconnect(con)
+   #+end_src
+  
+  Tidy the object up a little in JS to get rid of nested arrays since all trials are individual responses.
+
+  #+begin_src js :results output
+    let json =   
+        {
+            "trials": [
+                {
+                    "rt": 2850,
+                    "response": {
+                        "Vegetables": "2"
+                    },
+                    "question_order": [
+                        0
+                    ],
+                    "trial_type": "survey-likert",
+                    "trial_index": 0,
+                    "time_elapsed": 2852,
+                    "internal_node_id": "0.0-0.0"
+                },
+                {
+                    "rt": 2048,
+                    "response": {
+                        "Fruit": 1
+                    },
+                    "question_order": [
+                        0
+                    ],
+                    "trial_type": "survey-likert",
+                    "trial_index": 1,
+                    "time_elapsed": 4902,
+                    "internal_node_id": "0.0-1.0"
+                },
+                {
+                    "rt": 1948,
+                    "response": {
+                        "Meat": 3
+                    },
+                    "question_order": [
+                        0
+                    ],
+                    "trial_type": "survey-likert",
+                    "trial_index": 2,
+                    "time_elapsed": 6852,
+                    "internal_node_id": "0.0-2.0"
+                }
+            ]
+        }
+    
+    let json_trials =  json.trials.map(x => {
+    
+        let question = Object.keys(x.response)[0];
+        let response = x.response[question];
+    
+        return({
+            rt: x.rt,
+            question: question, 
+            response: response,
+            trial_type: x.trial_type,
+            trial_index: x.trial_index,
+            time_elapsed: x.time_elapsed,
+            internal_node_id: x.internal_node_id
+        })
+    
+    });
+    
+    let trial_data = {
+        json_trials: json_trials,
+        proc_method: 'insertLikertResp'
+    };
+    
+    // run postData(trial_data, 'theNameOfTheGeneralPurposeProcedureScriptShownBelow.php')
+    console.log(JSON.stringify(trial_data));
+    
+  #+end_src
+
+  #+RESULTS:
+  : {"json_trials":[{"rt":2850,"question":"Vegetables","response":"2","trial_type":"survey-likert","trial_index":0,"time_elapsed":2852,"internal_node_id":"0.0-0.0"},{"rt":2048,"question":"Fruit","response":1,"trial_type":"survey-likert","trial_index":1,"time_elapsed":4902,"internal_node_id":"0.0-1.0"},{"rt":1948,"question":"Meat","response":3,"trial_type":"survey-likert","trial_index":2,"time_elapsed":6852,"internal_node_id":"0.0-2.0"}],"proc_method":"insertLikertResp"}
+
+  Then in PHP just loop through the array of objects and use procedure to insert.
+  
+  #+begin_src php
+    // Get this from POST
+    $json_string = '{"json_trials":[{"rt":2850,"question":"Vegetables","response":"2","trial_type":"survey-likert","trial_index":0,"time_elapsed":2852,"internal_node_id":"0.0-0.0"},{"rt":2048,"question":"Fruit","response":1,"trial_type":"survey-likert","trial_index":1,"time_elapsed":4902,"internal_node_id":"0.0-1.0"},{"rt":1948,"question":"Meat","response":3,"trial_type":"survey-likert","trial_index":2,"time_elapsed":6852,"internal_node_id":"0.0-2.0"}],"proc_method":"insertLikertResp"}';
+    
+    $post_json = json_decode($json_string, true);
+    
+    $pdo = new PDO('mysql:host=127.0.0.1;port=3306;dbname=jsPsych', 'root', 'example');
+    
+    $sql_proc = 'CALL ' . $post_json['proc_method'] . '(?)' . PHP_EOL;
+        
+    $sth = $pdo->prepare($sql_proc);
+    
+    foreach($post_json['json_trials'] as $x){
+    
+        $sth->bindValue(1, json_encode($x), PDO::PARAM_STR);
+        $sth->execute();
+    };
+  #+end_src
+
+  #+RESULTS:
+  
